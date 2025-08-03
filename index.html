@@ -70,19 +70,15 @@
         
         let lastSegmentIndex = -1;
         let lastTickTime = 0;
-        // This is the critical flag for the audio unlock pattern
         let audioReady = false; 
         
-        // --- SOUND SETUP ---
         const tickSound = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 3, envelope: { attack: 0.001, decay: 0.2, sustain: 0 }, }).toDestination();
         const winSoundPlayer = new Tone.Player({
-            // Using a WAV file for broader compatibility
             url: "https://assets.mixkit.co/active_storage/sfx/1689/1689.wav",
             autostart: false,
         }).toDestination();
         const loseSound = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
 
-        // (Unchanged functions: drawWheel, easeOutQuint, animateSpin, loadWheelConfiguration)
         function drawWheel() {
             const outsideRadius = canvas.width / 2.3; const textRadius = canvas.width / 3.2; const centerX = canvas.width / 2; const centerY = canvas.height / 2;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -141,7 +137,6 @@
                 }
             }
 
-            // Play the sounds, which now works because the context is unlocked.
             if (audioReady && options[index]) {
                 if (options[index].winnable) {
                     winSoundPlayer.start();
@@ -150,31 +145,36 @@
                 }
             }
             
-            // Re-enable the button. This is no longer in a fragile `try...finally` block
-            // because the main audio error has been solved at the source.
             isSpinning = false;
             spinBtn.disabled = false;
             spinBtn.classList.add('animate-pulse');
             spinBtn.classList.remove('hover:animate-none');
         }
         
-        // --- THE ROBUST "AUDIO UNLOCK" PATTERN ---
+        // --- FINAL, ROBUST CLICK HANDLER ---
         spinBtn.addEventListener("click", async () => {
-            // If audio is not unlocked yet, this first click will unlock it.
-            if (!audioReady) {
-                spinBtn.textContent = 'جاري تهيئة الصوت...';
-                await Tone.start();
-                // We also wait for the audio file to be fully downloaded.
-                await Tone.loaded();
-                audioReady = true;
-                console.log("Audio is now unlocked and ready!");
-                spinBtn.textContent = 'جاهز! لف مرة أخرى';
-                return; // Stop here, the user will click again to spin.
-            }
-
-            // If we are here, audio is ready and we can spin.
-            if (isSpinning || options.length === 0) return;
+            // First, check if the wheel is already spinning.
+            if (isSpinning) return;
             
+            // On the very first click, audio will not be ready.
+            if (!audioReady) {
+                try {
+                    // Use the user's click to unlock and load audio.
+                    await Tone.start();
+                    await Tone.loaded();
+                    audioReady = true;
+                    console.log("Audio unlocked and all sounds are ready.");
+                } catch (error) {
+                    console.error("Audio could not be started:", error);
+                    // If audio fails, we still allow the wheel to spin without sound.
+                }
+            }
+            
+            // --- From here, the code proceeds to spin the wheel ---
+            
+            // Check if there are options to spin for.
+            if (options.length === 0) return;
+
             spinBtn.classList.remove('animate-pulse');
             spinBtn.classList.add('hover:animate-none');
             isSpinning = true;
