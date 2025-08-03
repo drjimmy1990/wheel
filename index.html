@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>عجلة الخديوي</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Cairo', sans-serif; }
+        .pointer {
+            width: 0; height: 0;
+            border-left: 25px solid transparent; border-right: 25px solid transparent;
+            border-top: 40px solid #E74C3C; position: absolute; top: -15px; left: 50%;
+            transform: translateX(-50%); z-index: 10; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
+        .pointer::after {
+            content: ''; position: absolute;
+            top: -45px; left: -8px; width: 16px; height: 16px;
+            background: #F1C40F; border-radius: 50%; border: 2px solid white;
+        }
+        #wheelCanvas {
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1)) drop-shadow(0 4px 6px rgba(0,0,0,0.05));
+        }
+    </style>
+</head>
+<body class="bg-gray-800 text-gray-200 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-xl mx-auto bg-gray-900 shadow-2-xl rounded-2xl p-6 md:p-8 flex flex-col items-center justify-center">
+        <h1 class="text-3xl md:text-5xl font-bold text-center text-indigo-400 mb-8 tracking-wider">عجلة الخديوي</h1>
+        <div class="flex flex-col items-center justify-center w-full">
+            <div class="relative w-full max-w-md aspect-square">
+                <div class="pointer"></div>
+                <canvas id="wheelCanvas" class="w-full h-full rounded-full" width="500" height="500"></canvas>
+            </div>
+            <button id="spinBtn" class="mt-10 w-full max-w-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 px-8 rounded-xl text-2xl shadow-lg transform hover:scale-105 transition-transform duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:transform-none animate-pulse hover:animate-none">
+                لف العجلة!
+            </button>
+            <div id="result" class="mt-8 text-3xl font-bold text-center h-10"></div>
+            <p id="setupMessage" class="mt-4 text-center text-gray-500 dark:text-gray-400 text-sm hidden">
+                الرجاء إعداد خيارات العجلة من <a href="admin.html" class="text-indigo-600 hover:underline font-semibold">صفحة التحكم</a>.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('wheelCanvas');
+        const ctx = canvas.getContext('2d');
+        const spinBtn = document.getElementById('spinBtn');
+        const resultDiv = document.getElementById('result');
+        const setupMessage = document.getElementById('setupMessage');
+
+        const logoImg = new Image();
+        logoImg.src = 'https://i.postimg.cc/hPFVG0BL/logo-removebg-preview.png';
+        let isLogoLoaded = false;
+        logoImg.onload = () => { isLogoLoaded = true; drawWheel(); };
+
+        const nonWinnableMarker = "*";
+        let options = []; 
+        let spinDuration = 10;
+        const colors = ["#2ECC71", "#9B59B6", "#E74C3C", "#E67E22", "#3498DB", "#16A085", "#F1C40F", "#27AE60", "#8E44AD", "#C0392B"];
+        
+        let arc = 0;
+        let isSpinning = false;
+        let currentRotation = 0;
+        
+        let lastSegmentIndex = -1;
+        let lastTickTime = 0;
+        // This is the critical flag for the audio unlock pattern
+        let audioReady = false; 
+        
+        // --- SOUND SETUP ---
+        const tickSound = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 3, envelope: { attack: 0.001, decay: 0.2, sustain: 0 }, }).toDestination();
+        const winSoundPlayer = new Tone.Player({
+            // Using a WAV file for broader compatibility
+            url: "https://assets.mixkit.co/active_storage/sfx/1689/1689.wav",
+            autostart: false,
+        }).toDestination();
+        const loseSound = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
+
+        // (Unchanged functions: drawWheel, easeOutQuint, animateSpin, loadWheelConfiguration)
+        function drawWheel() {
+            const outsideRadius = canvas.width / 2.3; const textRadius = canvas.width / 3.2; const centerX = canvas.width / 2; const centerY = canvas.height / 2;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (options.length === 0) { ctx.fillStyle = "#CCC"; ctx.beginPath(); ctx.arc(centerX, centerY, outsideRadius, 0, Math.PI * 2, false); ctx.fill(); ctx.fillStyle = '#666'; ctx.font = 'bold 20px Cairo'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('لا توجد خيارات', centerX, centerY - 20); ctx.fillText('أضفها من لوحة التحكم', centerX, centerY + 20); return; }
+            ctx.save(); ctx.translate(centerX, centerY); ctx.rotate(currentRotation); ctx.translate(-centerX, -centerY); ctx.font = `bold ${canvas.width / 30}px Cairo, sans-serif`;
+            for (let i = 0; i < options.length; i++) {
+                const angle = i * arc; ctx.fillStyle = colors[i % colors.length]; ctx.beginPath(); ctx.arc(centerX, centerY, outsideRadius, angle, angle + arc, false); ctx.lineTo(centerX, centerY); ctx.fill();
+                ctx.save(); ctx.strokeStyle = "white"; ctx.lineWidth = canvas.width / 125; ctx.beginPath(); ctx.moveTo(centerX, centerY); ctx.arc(centerX, centerY, outsideRadius, angle, angle + arc, false); ctx.lineTo(centerX, centerY); ctx.stroke(); ctx.restore();
+                ctx.save(); ctx.fillStyle = "white"; const textAngle = angle + arc / 2; ctx.translate(centerX + Math.cos(textAngle) * textRadius, centerY + Math.sin(textAngle) * textRadius); ctx.rotate(textAngle + Math.PI / 2); const text = options[i].display; ctx.textAlign = "center";
+                const words = text.split(' '); let line = ''; const lines = []; for(let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = ctx.measureText(testLine); if (metrics.width > (canvas.width/4.5) && n > 0) { lines.push(line); line = words[n] + ' '; } else { line = testLine; } } lines.push(line); const startY = 0 - (lines.length - 1) * (canvas.width / 25) / 2; for(let k = 0; k < lines.length; k++) { ctx.fillText(lines[k], 0, startY + k * (canvas.width / 25)); }
+                ctx.restore();
+            } ctx.restore();
+            const logoRadius = canvas.width / 8; const goldGradient = ctx.createRadialGradient(centerX, centerY, logoRadius - 10, centerX, centerY, logoRadius + 10); goldGradient.addColorStop(0, '#F0C400'); goldGradient.addColorStop(0.5, '#FFD700'); goldGradient.addColorStop(1, '#DAA520'); ctx.strokeStyle = goldGradient; ctx.lineWidth = canvas.width / 40; ctx.beginPath(); ctx.arc(centerX, centerY, logoRadius, 0, Math.PI * 2, false); ctx.stroke(); ctx.beginPath(); ctx.arc(centerX, centerY, logoRadius, 0, Math.PI * 2, false); ctx.fillStyle = '#ffffff'; ctx.fill(); 
+            if (isLogoLoaded) { const logoSize = logoRadius * 1.6; ctx.drawImage(logoImg, centerX - logoSize / 2, centerY - logoSize / 2, logoSize, logoSize); } 
+            else { ctx.fillStyle = '#374151'; ctx.font = `bold ${canvas.width / 20}px Cairo`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('اللوجو', centerX, centerY); }
+        }
+        function easeOutQuint(t) { return 1 - (--t) * t * t * t * t }
+        function animateSpin(startTime, startRotation, spinAmount) {
+            const currentTime = Date.now(); const elapsedTime = currentTime - startTime; const duration = spinDuration * 1000;
+            if (elapsedTime >= duration) { currentRotation = startRotation + spinAmount; stopRotateWheel(); return; }
+            const progress = elapsedTime / duration; const easedProgress = easeOutQuint(progress);
+            currentRotation = startRotation + spinAmount * easedProgress;
+            if (audioReady && arc > 0) {
+                const pointerFixedAngleRad = 1.5 * Math.PI; const wheelRotationEffective = currentRotation % (2 * Math.PI);
+                let angleUnderPointerRad = (pointerFixedAngleRad - wheelRotationEffective + 2 * Math.PI) % (2 * Math.PI);
+                const segmentIndex = Math.floor(angleUnderPointerRad / arc);
+                if (segmentIndex !== lastSegmentIndex) {
+                    const now = Tone.now();
+                    if (now > lastTickTime + 0.05) { tickSound.triggerAttackRelease("C2", "8n", now); lastTickTime = now; }
+                    lastSegmentIndex = segmentIndex;
+                }
+            }
+            drawWheel(); requestAnimationFrame(() => animateSpin(startTime, startRotation, spinAmount));
+        }
+        function loadWheelConfiguration() {
+            const storedOptionsData = localStorage.getItem('wheelOptionsData'); const storedDuration = localStorage.getItem('wheelSpinDuration');
+            if (storedOptionsData) {
+                options = JSON.parse(storedOptionsData);
+                if (options.length > 1) { arc = Math.PI * 2 / options.length; spinBtn.disabled = false; setupMessage.classList.add('hidden'); } 
+                else { options = []; resultDiv.textContent = "الرجاء إعداد خيارين على الأقل في لوحة التحكم."; spinBtn.disabled = true; setupMessage.classList.remove('hidden'); }
+            } else { options = []; resultDiv.textContent = "لم يتم إعداد خيارات العجلة بعد."; spinBtn.disabled = true; setupMessage.classList.remove('hidden'); }
+            if (storedDuration) { spinDuration = parseFloat(storedDuration); }
+            drawWheel();
+        }
+
+        function stopRotateWheel() {
+            const pointerFixedAngleRad = 1.5 * Math.PI; const finalWheelRotationEffective = currentRotation % (2 * Math.PI);
+            let angleUnderPointerRad = (pointerFixedAngleRad - finalWheelRotationEffective + 2 * Math.PI) % (2 * Math.PI);
+            const index = Math.floor(angleUnderPointerRad / arc);
+
+            if (options[index]) {
+                const winner = options[index];
+                resultDiv.innerHTML = `🎉 ${winner.display} 🎉`; 
+                if (winner.winnable) {
+                    confetti({ particleCount: 150, spread: 90, origin: { y: 0.6 } });
+                }
+            }
+
+            // Play the sounds, which now works because the context is unlocked.
+            if (audioReady && options[index]) {
+                if (options[index].winnable) {
+                    winSoundPlayer.start();
+                } else {
+                    loseSound.triggerAttackRelease("A2", "8n");
+                }
+            }
+            
+            // Re-enable the button. This is no longer in a fragile `try...finally` block
+            // because the main audio error has been solved at the source.
+            isSpinning = false;
+            spinBtn.disabled = false;
+            spinBtn.classList.add('animate-pulse');
+            spinBtn.classList.remove('hover:animate-none');
+        }
+        
+        // --- THE ROBUST "AUDIO UNLOCK" PATTERN ---
+        spinBtn.addEventListener("click", async () => {
+            // If audio is not unlocked yet, this first click will unlock it.
+            if (!audioReady) {
+                spinBtn.textContent = 'جاري تهيئة الصوت...';
+                await Tone.start();
+                // We also wait for the audio file to be fully downloaded.
+                await Tone.loaded();
+                audioReady = true;
+                console.log("Audio is now unlocked and ready!");
+                spinBtn.textContent = 'جاهز! لف مرة أخرى';
+                return; // Stop here, the user will click again to spin.
+            }
+
+            // If we are here, audio is ready and we can spin.
+            if (isSpinning || options.length === 0) return;
+            
+            spinBtn.classList.remove('animate-pulse');
+            spinBtn.classList.add('hover:animate-none');
+            isSpinning = true;
+            spinBtn.disabled = true;
+            resultDiv.innerHTML = "";
+
+            const winnableOptions = options.filter(item => item.winnable);
+            if (winnableOptions.length === 0) {
+                resultDiv.textContent = "لا توجد خيارات فائزة!";
+                isSpinning = false; spinBtn.disabled = false; return;
+            }
+            const winner = winnableOptions[Math.floor(Math.random() * winnableOptions.length)];
+            const winnerIndex = options.indexOf(winner);
+            const arcDegrees = 360 / options.length;
+            const randomOffsetDegrees = (Math.random() * 0.8 + 0.1) * arcDegrees;
+            const targetAngleOnWheelDegrees = (winnerIndex * arcDegrees) + randomOffsetDegrees;
+            const finalAngleOffset = 270 - targetAngleOnWheelDegrees;
+            const fullSpins = 8 * 360;
+            const currentAngleDegrees = (currentRotation * 180 / Math.PI);
+            const currentCirclePosition = (currentAngleDegrees % 360 + 360) % 360;
+            const finalCirclePosition = (finalAngleOffset % 360 + 360) % 360;
+            let adjustment = finalCirclePosition - currentCirclePosition;
+            if (adjustment < 0) { adjustment += 360; }
+            const spinAmountDegrees = fullSpins + adjustment;
+            const spinAmountRadians = spinAmountDegrees * Math.PI / 180;
+            animateSpin(Date.now(), currentRotation, spinAmountRadians);
+        });
+        
+        window.onload = loadWheelConfiguration;
+        window.onresize = drawWheel;
+    </script>
+</body>
+</html>
